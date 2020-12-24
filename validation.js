@@ -26,16 +26,41 @@ const loginValidation = (data)=>{
 }
 const postValidation = (data)=>{
 
-    //Validation schema
-    const schema = Joi.object({
-        title: Joi.string().min(6).required(),
-        content: Joi.string().min(10).required(),
-    });
+    try{
 
-    return schema.validate(data);
+        //Validation schema
+        const schema = Joi.object({
+            title: Joi.string().min(6).required(),
+            content: Joi.string().min(10).required(),
+            author:Joi.string().required(),
+            tags:Joi.array().items(Joi.string().min(5).max(30))
+        });
+    
+        return schema.validate(data);
+
+    }catch(e){
+        return new Error(e)
+    }
+
+}
+const commentValidation = (data)=>{
+
+    try{
+        //Validation schema
+        const schema = Joi.object({
+            text: Joi.string().min(6).required(),
+            post:Joi.required(),
+            author:Joi.optional(),
+        });    
+        return schema.validate(data);
+
+    }catch(e){
+        return new Error(e)
+    }
 
 }
 
 module.exports.registerValidation = registerValidation;
 module.exports.loginValidation = loginValidation;
 module.exports.postValidation = postValidation;
+module.exports.commentValidation = commentValidation;

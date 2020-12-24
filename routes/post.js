@@ -1,7 +1,9 @@
 const router = require("express").Router();
 const verify = require("../verifytoken");
 const Post = require("../model/Post");
-const { postValidation } = require("../validation");
+const User = require("../model/User");
+const Comment = require("../model/Comment");
+const { postValidation, commentValidation } = require("../validation");
 
 router.get("/", async (req, res) => {
     const posts = await Post.find();
@@ -9,36 +11,114 @@ router.get("/", async (req, res) => {
 });
 router.get("/:id", async (req, res) => {
     try {
-        const posts = await Post.findById(req.params.id);
-        console.log(posts);
-        res.json(posts);
+        const post = await Post.findById(req.params.id)
+            .populate({
+                path: "comments",
+                model: "Comment",
+                populate: [
+                    {
+                        path: "replys",
+                        model: "Comment",
+                        populate:{
+                            path:"author",
+                            model:"User",
+                            select:"name"
+                        }
+                    },
+                    {
+                        path: "author",
+                        model: "User",
+                        select: "name",
+                    },
+                ],
+            })
+            .populate("author");
+        res.json(post);
     } catch (e) {
-        console.log(e);
-        res.status(400).send(e.message);
+        res.status(400).send({
+            error: true,
+            from: "query",
+            message: e.message,
+        });
     }
 });
-router.post("/",verify, async (req, res) => {
+router.post("/", verify, async (req, res) => {
     try {
-        const { title, content } = req.body;
-
+        const { title, content, author, tags } = req.body;
         //Validating Data
-        const { error } = postValidation(req.body);
-        if (error) return res.status(400).send(error.details[0].message);
-
-        // const { title, content } = req.body;
+        const { error } = await postValidation(req.body);
+        if (error)
+            return res.status(400).json({
+                error: true,
+                from: "validation",
+                message: error.details[0].message,
+            });
 
         const post = new Post({
             title,
             content,
+            author,
+            tags,
         });
 
         const savedPost = await post.save();
-        res.send(savedPost);
+        const user = await User.findById(author);
+        user.posts.push(savedPost);
+        await user.save();
+        thatUser = await User.findById(author).populate("posts");
+        res.send({ savedPost });
     } catch (e) {
-        res.status(400).send(e.message);
+        res.status(400).json({
+            error: true,
+            from: "query",
+            message: e.message,
+        });
     }
 });
+router.post("/comment", async (req, res) => {
+    try {
+        const { user: author, post, text, parentComment } = req.body;
+        //Validating Data
+        const { error } = await commentValidation({ author, post, text });
+        if (error)
+            return res.status(400).json({
+                error: true,
+                from: "validation",
+                message: error.details[0].message,
+            });
 
+        console.log({ author });
+
+        const comment = new Comment({
+            text,
+            post,
+            author,
+        });
+
+        const savedComment = await comment.save();
+
+        if (parentComment) {
+            const theParentComment = parentComment._id
+                ? await Comment.findById(parentComment._id)
+                : await Comment.findById(parentComment);
+            theParentComment.replys.push(savedComment);
+            await theParentComment.save();
+        } else {
+            const thePost = post._id
+                ? await Post.findById(post._id)
+                : await Post.findById(post);
+            thePost.comments.push(savedComment);
+            await thePost.save();
+        }
+        res.send({ savedComment });
+    } catch (e) {
+        res.status(400).json({
+            error: true,
+            from: "Create Comment",
+            message: e.message,
+        });
+    }
+});
 router.put("/:id", verify, async (req, res) => {
     const error = [];
 
@@ -47,14 +127,13 @@ router.put("/:id", verify, async (req, res) => {
 
         //Validating Data
         const { validation_error } = postValidation(req.body);
-        if (validation_error)
-            return res
-                .status(400)
-                .send({
-                    error: true,
-                    from: "validation",
-                    message: error.details[0].message,
-                });
+        if (validation_error) {
+            return res.status(400).send({
+                error: true,
+                from: "validation",
+                message: error.details[0].message,
+            });
+        }
 
         const post = await Post.findById(req.params.id);
 
@@ -62,6 +141,14 @@ router.put("/:id", verify, async (req, res) => {
             return res
                 .status(400)
                 .send({ error: true, from: "query", message: "Not found" });
+        }
+
+        if (post.author != req.user._id) {
+            // console.log({a:JSON.stringify(post.author)})
+            // console.log({b:req.user._id})
+            return res
+                .status(400)
+                .send({ error: true, from: "query", message: "Not Allowed" });
         }
 
         post.title = title;
@@ -78,8 +165,6 @@ router.put("/:id", verify, async (req, res) => {
     }
 });
 router.delete("/:id", verify, async (req, res) => {
-    const error = [];
-
     try {
         const post = await Post.findById(req.params.id);
 
@@ -87,6 +172,12 @@ router.delete("/:id", verify, async (req, res) => {
             return res
                 .status(400)
                 .send({ error: true, from: "query", message: "Not found" });
+        }
+
+        if (post.author != req.user._id) {
+            return res
+                .status(400)
+                .send({ error: true, from: "query", message: "Not Allowed" });
         }
 
         const result = await post.delete();
